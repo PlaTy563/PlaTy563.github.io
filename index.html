@@ -5,6 +5,7 @@
     <title>かものはし家計簿</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="icon-512.png">
+    <link rel="manifest" href="manifest.json">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script type="module">
@@ -12,10 +13,15 @@
         window.GoogleGenerativeAI = GoogleGenerativeAI;
     </script>
     <style>
-        :root{--primary-color:#2e7d32;--primary-dark-variant:#266b2a;--primary-light-variant:#5cb85c;--background-light:#f8f8f8;--background-dark:#121212;--card-bg-light:#fff;--card-bg-dark:#1e1e1e;--text-color-light:#333;--text-color-dark:#e0e0e0;--border-color-light:#e0e0e0;--border-color-dark:#444}body{margin:0;font-family:'Noto Sans JP',sans-serif;padding-bottom:90px;background-color:var(--background-light);color:var(--text-color-light)}@media (prefers-color-scheme:dark){body{background-color:var(--background-dark);color:var(--text-color-dark)}section{background-color:var(--card-bg-dark)}input,select,button{background-color:var(--card-bg-dark);color:var(--text-color-dark);border-color:var(--border-color-dark)}table,th,td{border-color:var(--border-color-dark)}}main{display:flex;flex-direction:column;align-items:center;width:100%;max-width:48rem;margin:2rem auto;padding:0 1rem}section{background-color:var(--card-bg-light);padding:1.5rem;border-radius:.75rem;box-shadow:0 4px 6px rgba(0,0,0,.1);margin-bottom:1.5rem;width:100%}h2{font-size:1.25rem;font-weight:700;margin-top:0;margin-bottom:1rem}.tab-buttons{position:fixed;bottom:0;left:0;right:0;background-color:var(--primary-dark-variant);box-shadow:0 -4px 6px rgba(0,0,0,.1);display:flex;justify-content:space-around;padding:.75rem;z-index:10}.tab-buttons button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:.5rem 0;border:none;background-color:transparent;color:#fff;font-size:.75rem;border-radius:.5rem;transition:background-color .2s}.tab-buttons button.active{background-color:var(--primary-light-variant)}.tab-buttons button span{font-size:1.5rem;line-height:1}form input,form select,form button{width:100%;padding:.75rem;border-radius:.5rem;border:1px solid var(--border-color-light);font-size:1rem;box-sizing:border-box}form > * {margin-bottom: 0.75rem;}button{background-color:var(--primary-color);color:#fff;font-weight:700;border:none;cursor:pointer;transition:background-color .2s}button:hover{background-color:var(--primary-light-variant)}.split-item-row{display:flex;gap:.5rem;align-items:center}.split-item-row select{flex:2}.split-item-row input{flex:2}.split-item-row button{flex-shrink:0;width:auto;padding:.5rem .75rem;font-size:1rem;line-height:1;background-color:#ef4444}#total-split-amount{font-size:1.25rem;font-weight:700;text-align:right;margin-top:1rem;color:var(--primary-dark-variant)}table{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.875rem}th,td{padding:.75rem .5rem;border:1px solid var(--border-color-light);text-align:center}tr.split-group-start > td{border-top:2px solid var(--primary-color) !important}tr.split-child > td{border-top:1px dashed #ccc !important}.split-child .split-info-cell{color:#9ca3af}
+        :root{--primary-color:#2e7d32;--primary-dark-variant:#266b2a;--primary-light-variant:#5cb85c;--background-light:#f8f8f8;--background-dark:#121212;--card-bg-light:#fff;--card-bg-dark:#1e1e1e;--text-color-light:#333;--text-color-dark:#e0e0e0;--border-color-light:#e0e0e0;--border-color-dark:#444}body{margin:0;font-family:'Noto Sans JP',sans-serif;padding-bottom:90px;background-color:var(--background-light);color:var(--text-color-light)}@media (prefers-color-scheme:dark){body{background-color:var(--background-dark);color:var(--text-color-dark)}section{background-color:var(--card-bg-dark)}input,select,button{background-color:var(--card-bg-dark);color:var(--text-color-dark);border-color:var(--border-color-dark)}table,th,td{border-color:var(--border-color-dark)}}header{display:flex;align-items:center;justify-content:center;padding:1rem;background-color:var(--primary-dark-variant);color:#fff;width:100%;box-shadow:0 4px 6px rgba(0,0,0,.1);max-width:48rem;margin:0 auto;border-bottom-left-radius:.75rem;border-bottom-right-radius:.75rem}header img{width:64px;height:64px;margin-right:1rem}header h1{font-size:1.75rem;font-weight:700;margin:0}main{display:flex;flex-direction:column;align-items:center;width:100%;max-width:48rem;margin:2rem auto;padding:0 1rem}section{background-color:var(--card-bg-light);padding:1.5rem;border-radius:.75rem;box-shadow:0 4px 6px rgba(0,0,0,.1);margin-bottom:1.5rem;width:100%}h2{font-size:1.25rem;font-weight:700;margin-top:0;margin-bottom:1rem}.tab-buttons{position:fixed;bottom:0;left:0;right:0;background-color:var(--primary-dark-variant);box-shadow:0 -4px 6px rgba(0,0,0,.1);display:flex;justify-content:space-around;padding:.75rem;z-index:10}.tab-buttons button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:.5rem 0;border:none;background-color:transparent;color:#fff;font-size:.75rem;border-radius:.5rem;transition:background-color .2s}.tab-buttons button.active{background-color:var(--primary-light-variant)}.tab-buttons button span{font-size:1.5rem;line-height:1}form input,form select,form button{width:100%;padding:.75rem;border-radius:.5rem;border:1px solid var(--border-color-light);font-size:1rem;box-sizing:border-box}form > * {margin-bottom: 0.75rem;}button{background-color:var(--primary-color);color:#fff;font-weight:700;border:none;cursor:pointer;transition:background-color .2s}button:hover{background-color:var(--primary-light-variant)}.split-item-row{display:flex;gap:.5rem;align-items:center}.split-item-row select{flex:2}.split-item-row input{flex:2}.split-item-row button{flex-shrink:0;width:auto;padding:.5rem .75rem;font-size:1rem;line-height:1;background-color:#ef4444}#total-split-amount{font-size:1.25rem;font-weight:700;text-align:right;margin-top:1rem;color:var(--primary-dark-variant)}table{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.875rem}th,td{padding:.75rem .5rem;border:1px solid var(--border-color-light);text-align:center}tr.split-group-start > td{border-top:2px solid var(--primary-color) !important}tr.split-child > td{border-top:1px dashed #ccc !important}.split-child .split-info-cell{color:#9ca3af}
     </style>
 </head>
 <body>
+    <header>
+        <img src="icon-512.png" alt="かものはし家計簿ロゴ">
+        <h1>かものはし家計簿</h1>
+    </header>
+
     <main id="mainContent">
         <div id="homeSection">
              <section>
@@ -24,7 +30,7 @@
                     レシート自動入力 (OCR)
                 </h2>
                 <p style="font-size: 0.8rem; color: #6b7280; margin-top: -8px;">※APIの無料枠（1分あたり60回）を超えないよう、1日の上限を50回に制限しています。</p>
-                <input type="file" id="receipt-uploader" multiple accept="image/*" style="margin-top: 1rem;">
+                <input type="file" id="receipt-uploader" accept="image/*" capture="environment">
                 <button id="process-receipts-btn" style="margin-top: 0.5rem;">選択したレシートを読み取る</button>
                 <div id="ocr-status" style="text-align: center; margin-top: 1rem; font-weight: bold;"></div>
                 <div id="ocr-results" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 8px;"></div>
@@ -174,7 +180,7 @@
         }
         
         // --- イベントハンドラ ---
-        async function handleRecordSubmit(e) {
+        function handleRecordSubmit(e) {
             e.preventDefault();
             const date = document.getElementById('date').value;
             const place = document.getElementById('place').value;
@@ -259,7 +265,8 @@
             const uploader = document.getElementById('receipt-uploader');
             const statusDiv = document.getElementById('ocr-status');
             const resultsDiv = document.getElementById('ocr-results');
-            if (uploader.files.length === 0) { alert('レシート画像を選択してください。'); return; }
+            const files = uploader.files;
+            if (files.length === 0) { alert('レシート画像を選択してください。'); return; }
 
             statusDiv.textContent = '処理を開始します...'; resultsDiv.innerHTML = '';
             const SAFE_LIMIT_PER_DAY = 50;
@@ -273,8 +280,7 @@
 
             const genAI = new window.GoogleGenerativeAI(apiKey);
             const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-            const files = Array.from(uploader.files);
-
+            
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 if (usageCount >= SAFE_LIMIT_PER_DAY) {
@@ -313,6 +319,7 @@
                 }
             }
             statusDiv.textContent = '全ての処理が完了しました。';
+            uploader.value = ''; // 選択をリセット
         }
 
         // --- 初期化 ---
@@ -323,6 +330,7 @@
             document.getElementById('recordForm').addEventListener('submit', handleRecordSubmit);
             document.getElementById('add-split-item-btn').addEventListener('click', () => addSplitItemRow(document.getElementById('split-items-container')));
             document.getElementById('addGenreBtn').addEventListener('click', addGenre);
+            
             const apiKeyInput = document.getElementById('apiKeyInput');
             const saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
             if (apiKeyInput) apiKeyInput.value = localStorage.getItem('geminiApiKey') || '';
@@ -332,9 +340,12 @@
                 else { alert('APIキーを入力してください。'); }
             });
             document.getElementById('process-receipts-btn').addEventListener('click', handleReceiptProcessing);
+            
             const container = document.getElementById('split-items-container');
-            if(container) { addSplitItemRow(container); updateSplitTotal(); }
+            addSplitItemRow(container);
+            updateSplitTotal();
             document.getElementById('date').valueAsDate = new Date();
+            
             switchTab('home');
             renderApp();
         });
