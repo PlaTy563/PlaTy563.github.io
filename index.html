@@ -409,8 +409,95 @@
                 reader.onerror = error => reject(error);
             });
         }
-        async function handleReceiptProcessing() { /* (Implementation is long, omitted for brevity but present in the full code) */ }
-        function handleAuthClick(isSilent = false) {
+ 
+async function handleReceiptProcessing() {
+    const uploader = document.getElementById('receipt-uploader');
+    const statusDiv = document.getElementById('ocr-status');
+    const resultsDiv = document.getElementById('ocr-results');
+    const processBtn = document.getElementById('process-receipts-btn'); // ボタンを取得
+
+    // ★★★ ここからが変更点 ★★★
+    // 処理開始時にボタンを無効化し、テキストを変更
+    processBtn.disabled = true;
+    processBtn.textContent = '読み取り中...';
+    // ★★★ 変更点ここまで ★★★
+
+    try {
+        const apiKey = localStorage.getItem('geminiApiKey');
+        if (!apiKey) {
+            alert('APIキーが設定されていません。「設定」画面でAPIキーを保存してください。');
+            switchTab('settings');
+            return; // finallyブロックが実行されるようにreturnで抜ける
+        }
+
+        const files = uploader.files;
+        if (files.length === 0) {
+            alert('レシート画像を選択してください。');
+            return;
+        }
+        if (files.length > 1) {
+            alert('複数レシートの一括読み取りでは、一度に1枚の画像のみ選択してください。');
+            return;
+        }
+
+        statusDiv.textContent = '処理を開始します...';
+        resultsDiv.innerHTML = '';
+        const SAFE_LIMIT_PER_DAY = 50;
+        const today = new Date().toISOString().slice(0, 10);
+        let usageCount = parseInt(localStorage.getItem(`ocrUsage_${today}`) || '0');
+
+        if (usageCount >= SAFE_LIMIT_PER_DAY) {
+            statusDiv.textContent = `1日の上限（${SAFE_LIMIT_PER_DAY}回）に達しました。`;
+            return;
+        }
+
+        const file = files[0];
+        statusDiv.textContent = `${file.name} を読み取り中...`;
+        
+        const genAI = new window.GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const base64Image = await fileToBase64(file);
+        const prompt = `この1枚の画像に写っている全てのレシートを個別に認識し、各レシートから以下の情報を抽出し、必ずJSONの配列（リスト）形式で回答してください。- place: 店名 (文字列) - date: 日付 (YYYY-MM-DD形式の文字列) - total: 合計金額 (数値)`;
+        const imagePart = { inlineData: { data: base64Image, mimeType: file.type } };
+        const result = await model.generateContent([prompt, imagePart]);
+        const responseText = result.response.text().replace(/```json|```/g, '').trim();
+        const resultsArray = JSON.parse(responseText);
+
+        if (resultsArray.length === 0) {
+            statusDiv.textContent = '画像からレシートを検出できませんでした。';
+            return;
+        }
+
+        resultsArray.forEach(data => {
+            const card = document.createElement('div');
+            card.style.cssText = 'border: 1px solid #ccc; padding: 12px; cursor: pointer; border-radius: 8px;';
+            card.innerHTML = `<strong>店名:</strong> ${data.place||'不明'}<br><strong>日付:</strong> ${data.date||'不明'}<br><strong>合計:</strong> ${new Intl.NumberFormat().format(data.total||0)} 円`;
+            card.onclick = () => {
+                document.getElementById('place').value = data.place || '';
+                if(data.date && data.date !== '不明') document.getElementById('date').value = data.date;
+                const container = document.getElementById('split-items-container');
+                container.innerHTML = ''; addSplitItemRow(container);
+                container.querySelector('.split-amount').value = data.total || '';
+                updateSplitTotal(); alert(`「${data.place}」の情報をフォームに入力しました。`);
+            };
+            resultsDiv.appendChild(card);
+        });
+        usageCount++;
+        localStorage.setItem(`ocrUsage_${today}`, usageCount);
+        statusDiv.textContent = `${resultsArray.length}件のレシートを検出しました。`;
+
+    } catch (err) {
+        console.error("OCR処理エラー:", err);
+        statusDiv.textContent = '処理中にエラーが発生しました。';
+    } finally {
+        // ★★★ ここからが変更点 ★★★
+        // 処理が成功しても失敗しても、必ずボタンを元の状態に戻す
+        processBtn.disabled = false;
+        processBtn.textContent = '選択したレシートを読み取る';
+        uploader.value = ''; // ファイル選択をリセット
+        // ★★★ 変更点ここまで ★★★
+    }
+}        function handleAuthClick(isSilent = false) {
             tokenClient.callback = async (resp) => {
                 if (resp.error !== undefined) { if(isSilent) return; throw (resp); }
                 localStorage.setItem('google_auth_loggedin', 'true');
