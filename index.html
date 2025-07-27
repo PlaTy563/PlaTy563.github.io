@@ -118,13 +118,14 @@
             <section>
                 <h2>ジャンルの管理</h2>
                 <div style="display:flex;gap:8px;">
-                  <input type="text" id="newGenre" placeholder="新しいジャンル名">
-                  <select id="newGenreType">
-                    <option value="">通常</option>
-                    <option value="fixed">定期（固定）</option>
-                    <option value="variable">定期（変動）</option>
-                  </select>
-                  <button id="addGenreBtn" style="width:auto;flex-shrink:0;">追加</button>
+                    <input type="text" id="newGenre" placeholder="新しいジャンル名">
+                    <select id="newGenreType">
+                        <option value="">通常</option>
+                        <option value="fixed">定期（固定）</option>
+                        <option value="variable">定期（変動）</option>
+                    </select>
+                    <input type="number" id="newGenreDueDay" min="1" max="31" placeholder="発生日 (任意)">
+                    <button id="addGenreBtn" style="width:auto;flex-shrink:0;">追加</button>
                 </div>
                 <div id="genreList" style="margin-top:1rem;"></div>
             </section>
@@ -145,12 +146,16 @@
                 <button id="importDataButton" style="margin-top:8px;">📥 インポート</button>
             </section>
             <section>
-                <h2>変動支出確認日</h2>
+                <h2>変動支出確認日と発生日</h2>
                 <div style="display:flex;gap:8px;align-items:center;">
-                    <input type="number" id="variableExpenseCheckDay" min="1" max="31" placeholder="毎月何日目に確認" style="flex:1;">
+                    <input type="number" id="variableExpenseCheckDay" min="1" max="31" placeholder="確認日 (毎月)" style="flex:1;">
                     <button id="saveVariableExpenseCheckDayBtn" style="width:auto;">保存</button>
                 </div>
-                <div id="variableExpenseCheckDayStatus" style="margin-top:0.5rem;color:#666;font-size:0.95rem;"></div>
+                <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+                    <input type="number" id="variableExpenseDueDay" min="1" max="31" placeholder="発生日 (毎月)" style="flex:1;">
+                    <button id="saveVariableExpenseDueDayBtn" style="width:auto;">保存</button>
+                </div>
+                <div id="variableExpenseStatus" style="margin-top:0.5rem;color:#666;font-size:0.95rem;"></div>
             </section>
         </div>
     </main>
@@ -158,6 +163,23 @@
         <button id="homeTab" class="active"><span>🏠</span>ホーム</button>
         <button id="settingsTab"><span>⚙️</span>設定</button>
     </div>
+
+    <div id="editTransactionModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%, -50%);background:#fff;padding:1rem;border-radius:8px;box-shadow:0 4px 6px rgba(0,0,0,0.1);z-index:1000;">
+        <h2>履歴の編集</h2>
+        <form id="editTransactionForm">
+            <label>日付: <input type="date" id="editDate" required></label><br>
+            <label>場所: <input type="text" id="editPlace" required></label><br>
+            <label>金額: <input type="number" id="editAmount" required></label><br>
+            <label>ジャンル: 
+                <select id="editGenre"></select>
+            </label><br>
+            <label>メモ: <input type="text" id="editMemo"></label><br>
+            <label>タグ: <input type="text" id="editTags"></label><br>
+            <button type="submit">保存</button>
+            <button type="button" id="cancelEditBtn">キャンセル</button>
+        </form>
+    </div>
+    <div id="modalOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:999;"></div>
 
     <script>
         // --- グローバル変数 ---
@@ -173,6 +195,7 @@
         let budgetPieChart = null;
         let accountBalance = 0;
         let variableExpenseCheckDay = 1;
+        let variableExpenseDueDay = 1; // Added initialization for variableExpenseDueDay
         const LOCAL_STORAGE_KEY = 'kakeiboData';
 
         // --- Google Drive API関連 ---
@@ -225,6 +248,7 @@
             rolloverGenres = data.rolloverGenres || [];
             accountBalance = parseInt(localStorage.getItem('accountBalance') || '0');
             variableExpenseCheckDay = parseInt(localStorage.getItem('variableExpenseCheckDay') || '1');
+            variableExpenseDueDay = parseInt(localStorage.getItem('variableExpenseDueDay') || '1');
         }
 
         function saveData() {
@@ -232,6 +256,7 @@
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(dataToSave));
             localStorage.setItem('accountBalance', accountBalance);
             localStorage.setItem('variableExpenseCheckDay', variableExpenseCheckDay);
+            localStorage.setItem('variableExpenseDueDay', variableExpenseDueDay); // Save variableExpenseDueDay
         }
 
         // --- UI更新 ---
@@ -239,7 +264,8 @@
             document.getElementById('monthSelector').value = currentMonth;
             document.getElementById('accountBalanceInput').value = accountBalance || '';
             document.getElementById('variableExpenseCheckDay').value = variableExpenseCheckDay || '';
-            document.getElementById('variableExpenseCheckDayStatus').textContent = `現在の確認日は毎月${variableExpenseCheckDay}日です。`;
+            document.getElementById('variableExpenseDueDay').value = variableExpenseDueDay || '';
+            document.getElementById('variableExpenseStatus').textContent = `現在の発生日は毎月${variableExpenseDueDay}日です。`;
 
             updateHistoryTable();
             updateGenreManagementList();
@@ -266,26 +292,55 @@
                 const isRolloverEnabled = rolloverGenres.includes(g.name);
                 const itemDiv = document.createElement('div');
                 itemDiv.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:4px;border-bottom:1px solid var(--border-color-light)';
-                itemDiv.innerHTML = `<span>${g.name} (${g.type || '通常'})</span><div style="display:flex;align-items:center;gap:8px;"><label style="font-size:0.8rem;"><input type="checkbox" class="rollover-checkbox" data-genre="${g.name}" ${isRolloverEnabled ? 'checked' : ''}> 繰越</label><button class="delete-btn" data-genre="${g.name}" style="width:auto;padding:2px 6px;background-color:#ef4444;">&times;</button></div>`;
+                itemDiv.innerHTML = `
+                    <span>${g.name || ''} (${g.type || '通常'})</span>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <input type="number" class="genre-due-day" data-genre="${g.name}" value="${g.dueDay || ''}" min="1" max="31" placeholder="発生日">
+                        <label style="font-size:0.8rem;">
+                            <input type="checkbox" class="rollover-checkbox" data-genre="${g.name}" ${isRolloverEnabled ? 'checked' : ''}> 繰越
+                        </label>
+                        <button class="delete-btn" data-genre="${g.name}" style="width:auto;padding:2px 6px;background-color:#ef4444;">&times;</button>
+                    </div>`;
                 genreListDiv.appendChild(itemDiv);
+
                 itemDiv.querySelector('.delete-btn').addEventListener('click', e => deleteGenre(e.target.dataset.genre));
                 itemDiv.querySelector('.rollover-checkbox').addEventListener('change', e => handleRolloverChange(e.target.dataset.genre, e.target.checked));
+                itemDiv.querySelector('.genre-due-day').addEventListener('change', e => updateGenreDueDay(e.target.dataset.genre, e.target.value));
             });
+        }
+
+        function updateGenreDueDay(genreName, dueDay) {
+            const genre = genres.find(g => g.name === genreName);
+            if (genre) {
+                genre.dueDay = parseInt(dueDay) || null;
+                saveData();
+            }
         }
 
         function updateHistoryTable() {
             const historyBody = document.getElementById('historyBody');
             historyBody.innerHTML = '';
             const filtered = transactions.filter(t => t.date && t.date.startsWith(currentMonth));
-            const sorted = filtered.sort((a,b) => b.date.localeCompare(a.date) || (b.timestamp > a.timestamp ? -1 : 1));
+            const sorted = filtered.sort((a, b) => b.date.localeCompare(a.date) || (b.timestamp > a.timestamp ? -1 : 1));
             sorted.forEach((transaction, index) => {
                 const row = historyBody.insertRow();
                 let isSplitChild = transaction.splitGroupId && index > 0 && sorted[index - 1].splitGroupId === transaction.splitGroupId;
                 if (transaction.splitGroupId && !isSplitChild) row.classList.add('split-group-start');
                 if (isSplitChild) row.classList.add('split-child');
                 const infoCell = (content) => isSplitChild ? `<span class="split-info-cell">${content || ''}</span>` : `<span>${content || ''}</span>`;
-                row.innerHTML = `<td>${infoCell(transaction.date)}</td><td>${infoCell(transaction.place)}</td><td style="color:${transaction.type === 'expense'?'red':'green'};">${new Intl.NumberFormat().format(transaction.amount)}円</td><td>${transaction.genre}</td><td>${infoCell(transaction.memo)}</td><td>${infoCell(transaction.tags)}</td><td><button class="delete-btn" data-timestamp="${transaction.timestamp}" style="background-color:#ef4444;padding:4px 8px;width:auto;">削除</button></td>`;
+                row.innerHTML = `
+                    <td>${infoCell(transaction.date || '')}</td>
+                    <td>${infoCell(transaction.place || '')}</td>
+                    <td style="color:${transaction.type === 'expense' ? 'red' : 'green'};">${new Intl.NumberFormat().format(transaction.amount || 0)}円</td>
+                    <td>${transaction.genre || ''}</td>
+                    <td>${infoCell(transaction.memo || '')}</td>
+                    <td>${infoCell(transaction.tags || '')}</td>
+                    <td>
+                        <button class="edit-btn" data-timestamp="${transaction.timestamp}" style="background-color:#4caf50;padding:4px 8px;width:auto;">編集</button>
+                        <button class="delete-btn" data-timestamp="${transaction.timestamp}" style="background-color:#ef4444;padding:4px 8px;width:auto;">削除</button>
+                    </td>`;
                 row.querySelector('.delete-btn').addEventListener('click', (e) => deleteTransaction(e.target.dataset.timestamp));
+                row.querySelector('.edit-btn').addEventListener('click', (e) => editTransaction(e.target.dataset.timestamp));
             });
         }
 
@@ -420,12 +475,15 @@
         function addGenre() {
             const newGenreInput = document.getElementById('newGenre');
             const newGenreType = document.getElementById('newGenreType').value;
+            const newGenreDueDay = parseInt(document.getElementById('newGenreDueDay').value) || null;
             const newGenreName = newGenreInput.value.trim();
+
             if (newGenreName && !genres.some(g => g.name === newGenreName)) {
-                genres.push({ name: newGenreName, type: newGenreType });
+                genres.push({ name: newGenreName, type: newGenreType, dueDay: newGenreDueDay });
                 saveData();
                 renderApp();
                 newGenreInput.value = '';
+                document.getElementById('newGenreDueDay').value = '';
             }
         }
 
@@ -645,29 +703,43 @@
         
         function renderBalanceGraph() {
             const area = document.getElementById('balanceGraphArea');
+            // Check if a chart already exists on the canvas and destroy it
+            const existingChart = Chart.getChart("balanceTrendChart");
+            if (existingChart) {
+                existingChart.destroy();
+            }
             area.innerHTML = '<canvas id="balanceTrendChart" style="max-width:100%;"></canvas>';
             const ctx = document.getElementById('balanceTrendChart').getContext('2d');
             const [year, month] = currentMonth.split('-').map(Number);
             const daysInMonth = new Date(year, month, 0).getDate();
 
+            // 日ごとの支出・収入集計
             let dailyChange = Array(daysInMonth).fill(0);
             transactions.filter(t => t.date && t.date.startsWith(currentMonth)).forEach(t => {
                 const day = new Date(t.date).getDate() - 1;
                 dailyChange[day] += (t.type === 'income' ? t.amount : -t.amount);
             });
 
+            // 残高推移計算 (修正: 初日の残高から計算を開始)
             let balanceTrend = [];
-            let currentBalance = accountBalance;
-            let monthStartBalance = currentBalance - dailyChange.reduce((acc, val, i) => {
-                 return new Date(currentMonth + `-${i+1}`).getDate() <= new Date().getDate() ? acc + val : acc;
-            }, 0);
+            // 今月の初日時点での残高を計算
+            let startingBalanceForMonth = accountBalance;
+            // 当月より前の取引の差額を計算
+            transactions.filter(t => t.date && t.date < `${currentMonth}-01`).forEach(t => {
+                startingBalanceForMonth += (t.type === 'income' ? t.amount : -t.amount);
+            });
 
-
+            let currentDayBalance = startingBalanceForMonth;
             for (let i = 0; i < daysInMonth; i++) {
-                if(i > 0) monthStartBalance += dailyChange[i-1];
-                balanceTrend.push(monthStartBalance);
+                currentDayBalance += dailyChange[i];
+                balanceTrend.push(currentDayBalance);
             }
 
+            // Y軸の最小値を計算
+            const minBalance = Math.min(...balanceTrend, startingBalanceForMonth); // Include startingBalanceForMonth for min calculation
+            const yAxisMin = Math.floor(minBalance / 1000) * 1000; // 最小値を1000円単位で切り下げ
+
+            // グラフ描画
             new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -675,7 +747,7 @@
                     datasets: [{
                         label: '口座残高推移',
                         data: balanceTrend,
-                        borderColor: '#2e7d32',
+                        borderColor: 'rgb(46,125,50)', // Added borderColor
                         backgroundColor: 'rgba(46,125,50,0.1)',
                         fill: true,
                         tension: 0.2
@@ -684,7 +756,13 @@
                 options: {
                     responsive: true,
                     plugins: { legend: { display: false } },
-                    scales: { y: { beginAtZero: false, title: { display: true, text: '残高(円)' } } }
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            min: yAxisMin, // Y軸の最小値を設定
+                            title: { display: true, text: '残高(円)' }
+                        }
+                    }
                 },
             });
         }
@@ -692,8 +770,15 @@
         function checkVariableExpensesIfNeeded() {
             const today = new Date();
             const [year, month] = currentMonth.split('-').map(Number);
+            // Check if the current month is the month being viewed in the selector
+            // And if today's date matches the check day
             if (today.getFullYear() === year && today.getMonth() + 1 === month && today.getDate() === variableExpenseCheckDay) {
-                // promptVariableExpenses(currentMonth); // この関数は未定義のためコメントアウト
+                // Prevent showing the alert multiple times in the same day
+                const lastAlertDate = localStorage.getItem('lastVariableExpenseAlert');
+                if (lastAlertDate !== today.toISOString().slice(0, 10)) {
+                    alert(`今月の変動支出は${variableExpenseDueDay}日に発生します。`);
+                    localStorage.setItem('lastVariableExpenseAlert', today.toISOString().slice(0, 10));
+                }
             }
         }
 
@@ -719,6 +804,30 @@
             saveData();
         }
 
+        function addVariableExpensesForMonth(month) {
+            genres.filter(g => g.type === 'variable').forEach(g => {
+                const budget = budgetsByMonth[month]?.[g.name];
+                const dueDay = g.dueDay || variableExpenseDueDay; // ジャンルごとの発生日を優先
+                if (budget) {
+                    const formattedDueDay = String(dueDay).padStart(2, '0');
+                    const alreadyExists = transactions.some(t => t.date === `${month}-${formattedDueDay}` && t.genre === g.name && t.memo === '変動支出（自動）');
+                    if (!alreadyExists) {
+                        transactions.push({
+                            date: `${month}-${formattedDueDay}`,
+                            place: g.name,
+                            type: 'expense',
+                            genre: g.name,
+                            amount: budget,
+                            memo: '変動支出（自動）',
+                            tags: '変動',
+                            timestamp: generateUniqueId()
+                        });
+                    }
+                }
+            });
+            saveData();
+        }
+
         // --- DOM読み込み後の初期化処理 ---
         document.addEventListener('DOMContentLoaded', () => {
             loadData();
@@ -734,7 +843,8 @@
                 const newMonth = e.target.value;
                 if (newMonth !== currentMonth) {
                     currentMonth = newMonth;
-                    addFixedExpensesForMonth(currentMonth); // 月変更時に固定費をチェック・追加
+                    addFixedExpensesForMonth(currentMonth); // 固定費を追加
+                    addVariableExpensesForMonth(currentMonth); // 変動費を追加
                     renderApp();
                 }
             });
@@ -782,8 +892,20 @@
                 if (!isNaN(val) && val >= 1 && val <= 31) {
                     variableExpenseCheckDay = val;
                     saveData();
-                    document.getElementById('variableExpenseCheckDayStatus').textContent = `現在の確認日は毎月${val}日です。`;
+                    document.getElementById('variableExpenseStatus').textContent = `現在の確認日は毎月${val}日です。`; // Corrected ID
                     alert('変動支出確認日を保存しました。');
+                } else {
+                    alert('1～31の範囲で入力してください。');
+                }
+            });
+
+            document.getElementById('saveVariableExpenseDueDayBtn').addEventListener('click', () => {
+                const val = parseInt(document.getElementById('variableExpenseDueDay').value);
+                if (!isNaN(val) && val >= 1 && val <= 31) {
+                    variableExpenseDueDay = val;
+                    localStorage.setItem('variableExpenseDueDay', val);
+                    document.getElementById('variableExpenseStatus').textContent = `現在の発生日は毎月${val}日です。`;
+                    alert('変動支出の発生日を保存しました。');
                 } else {
                     alert('1～31の範囲で入力してください。');
                 }
@@ -795,9 +917,74 @@
             document.getElementById('date').valueAsDate = new Date();
             
             addFixedExpensesForMonth(currentMonth); // 初期読み込み時に固定費をチェック
+            addVariableExpensesForMonth(currentMonth); // 初期読み込み時に変動費をチェック (added)
             switchTab('home');
             renderApp();
         });
+
+        function editTransaction(timestamp) {
+            const transaction = transactions.find(t => t.timestamp === timestamp);
+            if (!transaction) return;
+
+            // モーダルを表示
+            document.getElementById('editTransactionModal').style.display = 'block';
+            document.getElementById('modalOverlay').style.display = 'block';
+
+            // フォームにデータをセット
+            document.getElementById('editDate').value = transaction.date || '';
+            document.getElementById('editPlace').value = transaction.place || '';
+            document.getElementById('editAmount').value = transaction.amount || 0;
+            document.getElementById('editMemo').value = transaction.memo || '';
+            document.getElementById('editTags').value = transaction.tags || '';
+
+            // ジャンルセレクトボックスを更新
+            const genreSelect = document.getElementById('editGenre');
+            genreSelect.innerHTML = '';
+            genres.forEach(g => {
+                const option = document.createElement('option');
+                option.value = g.name;
+                option.textContent = g.name;
+                if (g.name === transaction.genre) option.selected = true;
+                genreSelect.appendChild(option);
+            });
+
+            // 保存ボタンの動作を設定
+            const form = document.getElementById('editTransactionForm');
+            form.onsubmit = (e) => {
+                e.preventDefault();
+                saveEditedTransaction(timestamp);
+            };
+
+            // キャンセルボタンの動作を設定
+            document.getElementById('cancelEditBtn').onclick = () => {
+                document.getElementById('editTransactionModal').style.display = 'none';
+                document.getElementById('modalOverlay').style.display = 'none';
+            };
+        }
+
+        function saveEditedTransaction(timestamp) {
+            const transaction = transactions.find(t => t.timestamp === timestamp);
+            if (!transaction) return;
+
+            // フォームのデータを取得
+            transaction.date = document.getElementById('editDate').value;
+            transaction.place = document.getElementById('editPlace').value;
+            transaction.amount = parseInt(document.getElementById('editAmount').value);
+
+            // データを保存してUIを更新
+            saveData();
+            renderApp();
+
+            // モーダルを閉じる
+            document.getElementById('editTransactionModal').style.display = 'none';
+            document.getElementById('modalOverlay').style.display = 'none';
+
+            alert('履歴を更新しました。');
+        }
+
+        function safeValue(value, defaultValue = '') {
+            return value !== undefined && value !== null ? value : defaultValue;
+        }
     </script>
 </body>
 </html>
