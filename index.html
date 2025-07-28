@@ -212,6 +212,11 @@
             </section>
             <section>
                 <h2>場所別支出</h2>
+                <div style="display:flex; gap: 8px; margin-bottom: 1rem; align-items: center;">
+                    <label for="spendingPlaceLimit" style="font-size: 0.9rem; margin-right: 4px;">表示項目数:</label>
+                    <input type="number" id="spendingPlaceLimit" value="10" min="1" style="flex: 1; padding: 0.5rem; font-size: 0.9rem; min-height: unset; margin-bottom: 0;">
+                    <button id="updateSpendingPlaceGraphBtn" style="width: auto; padding: 0.5rem 0.75rem; font-size: 0.9rem; min-height: unset; margin-bottom: 0;">更新</button>
+                </div>
                 <div id="spendingByPlaceGraphArea" style="margin:1rem 0;"></div>
             </section>
             <section>
@@ -412,6 +417,7 @@
         let placeGenreMap = {}; // 場所とジャンルの関連性を保持するオブジェクト
         let budgetSortColumn = 'genre'; // Default sort column
         let budgetSortDirection = 'asc'; // Default sort direction
+        let spendingPlaceLimit = 10; // 場所別支出グラフの表示項目数
 
         // --- Google Drive API関連 ---
         const API_KEY = 'AIzaSyA8SHDfUl1CWayCmq6oGREjnxWR6R8vPkM'; // ★GitHubに上げる際は必ずプレースホルダーに戻すこと！
@@ -1025,7 +1031,6 @@
 
                 const genAI = new window.GoogleGenerativeAI(apiKey);
                 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-                const base64Image = await fileToBase64(file);
                 const prompt = `この1枚の画像に写っている全てのレシートを個別に認識し、各レシートから以下の情報を抽出し、必ずJSONの配列（リスト）形式で回答してください。- place: 店名 (文字列) - date: 日付 (YYYY-MM-DD形式の文字列) - total: 合計金額 (数値)`;
                 const imagePart = { inlineData: { data: base64Image, mimeType: file.type } };
                 const result = await model.generateContent([prompt, imagePart]);
@@ -1217,8 +1222,18 @@
                     return acc;
                 }, {});
 
-            const labels = Object.keys(spendingByPlace);
-            const data = Object.values(spendingByPlace);
+            // 集計結果を配列に変換し、金額で降順ソート
+            let sortedPlaces = Object.keys(spendingByPlace).map(place => ({
+                place: place,
+                amount: spendingByPlace[place]
+            })).sort((a, b) => b.amount - a.amount);
+
+            // 表示項目数でフィルタリング
+            const limit = parseInt(document.getElementById('spendingPlaceLimit').value) || 10;
+            sortedPlaces = sortedPlaces.slice(0, limit);
+
+            const labels = sortedPlaces.map(item => item.place);
+            const data = sortedPlaces.map(item => item.amount);
 
             // データがない場合はメッセージを表示
             if (labels.length === 0) {
@@ -1236,8 +1251,8 @@
             canvas.id = 'spendingByPlaceChart';
             
             // データ量に応じてCanvasの幅を動的に設定
-            // 1項目あたり約80pxの幅を確保 (バーの幅 + パディング + ラベルスペース)
-            const requiredWidth = labels.length * 80; 
+            // 1項目あたり150pxの幅を確保 (バーの幅 + パディング + ラベルスペース)
+            const requiredWidth = labels.length * 150; 
             
             // Canvasの描画バッファサイズを設定
             // 親コンテナの現在の表示幅と、グラフが必要とする最小幅の大きい方を使用
@@ -1245,10 +1260,9 @@
             canvas.height = 300; // 描画バッファの高さは固定
 
             // Canvasの表示スタイルを設定
-            // scrollContainerの幅いっぱいに広がり、必要に応じてmaxWidthでコンテンツの最小幅を保証
             canvas.style.display = 'block';
-            canvas.style.width = '100%'; 
-            canvas.style.maxWidth = `${canvas.width}px`; // これが重要。canvasが小さくなりすぎないようにする
+            // ここを修正：canvas.width属性で設定した描画幅をそのままCSSのwidthに設定する
+            canvas.style.width = `${canvas.width}px`; 
             canvas.style.height = '300px'; 
 
             scrollContainer.appendChild(canvas);
@@ -1277,7 +1291,7 @@
                         },
                         title: {
                             display: true,
-                            text: '場所別支出' // グラフタイトル
+                            text: '場所別支出 (上位' + limit + '件)' // グラフタイトルに表示項目数を追加
                         }
                     },
                     scales: {
@@ -1297,7 +1311,10 @@
                             ticks: {
                                 autoSkip: false,
                                 maxRotation: 90,
-                                minRotation: 90
+                                minRotation: 90,
+                                font: {
+                                    size: 10 // ラベルのフォントサイズを小さくする
+                                }
                             }
                         }
                     }
@@ -1709,6 +1726,17 @@
                 budgetSortDirection = budgetSortDirection === 'asc' ? 'desc' : 'asc';
                 e.target.textContent = budgetSortDirection === 'asc' ? '▲' : '▼';
                 renderApp();
+            });
+
+            // 場所別支出グラフの表示項目数更新ボタンのイベントリスナー
+            document.getElementById('updateSpendingPlaceGraphBtn').addEventListener('click', () => {
+                const newLimit = parseInt(document.getElementById('spendingPlaceLimit').value);
+                if (!isNaN(newLimit) && newLimit > 0) {
+                    spendingPlaceLimit = newLimit;
+                    renderSpendingByPlaceGraph(); // グラフを再レンダリング
+                } else {
+                    showAlert('有効な表示項目数を入力してください (1以上の数値)。');
+                }
             });
 
 
