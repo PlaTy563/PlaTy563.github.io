@@ -118,6 +118,18 @@
             background-color: var(--primary-light-variant);
         }
 
+        /* 新しいスクロールコンテナのスタイル */
+        .scroll-graph-container {
+            overflow-x: auto;
+            width: 100%; /* 親要素の幅に合わせる */
+            padding-bottom: 15px; /* スクロールバーのための余白 */
+        }
+        .scroll-graph-container canvas {
+            display: block; /* 余分なスペースをなくす */
+            height: 300px; /* グラフの高さは固定 */
+            /* widthはJSで動的に設定される */
+        }
+
     </style>
 </head>
 <body>
@@ -374,11 +386,11 @@
 
         // --- Google API初期化コールバック ---
         // onload属性から直接呼び出せるようにグローバル関数として定義
-        function gapiLoaded() {
+        window.gapiLoaded = function() { // 修正: windowに明示的に割り当て
             gapi.load('client', initializeGapiClient);
         }
 
-        function gisLoaded() {
+        window.gisLoaded = function() { // 修正: windowに明示的に割り当て
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: SCOPES,
@@ -1139,8 +1151,7 @@
             if (spendingByPlaceChart) {
                 spendingByPlaceChart.destroy();
             }
-            area.innerHTML = '<canvas id="spendingByPlaceChart" style="max-width:100%;"></canvas>';
-            const ctx = document.getElementById('spendingByPlaceChart').getContext('2d');
+            area.innerHTML = ''; // エリアをクリア
 
             // 今月の支出データを場所ごとに集計
             const spendingByPlace = transactions
@@ -1159,6 +1170,25 @@
                 return;
             }
 
+            // スクロール可能なコンテナを作成
+            const scrollContainer = document.createElement('div');
+            scrollContainer.className = 'scroll-graph-container';
+            area.appendChild(scrollContainer);
+
+            // Canvas要素を作成
+            const canvas = document.createElement('canvas');
+            canvas.id = 'spendingByPlaceChart';
+            
+            // データ量に応じてCanvasの幅を動的に設定
+            // 1項目あたり約80pxの幅を確保 (バーの幅 + パディング + ラベルスペース)
+            const minWidth = Math.max(area.offsetWidth, labels.length * 80); 
+            canvas.style.width = `${minWidth}px`;
+            canvas.style.height = '300px'; // 高さは固定
+
+            scrollContainer.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+
+
             // グラフ描画
             spendingByPlaceChart = new Chart(ctx, {
                 type: 'bar', // 棒グラフを使用
@@ -1173,7 +1203,8 @@
                     }]
                 },
                 options: {
-                    responsive: true,
+                    responsive: false, // 親要素の幅に合わせない（スクロールのため）
+                    maintainAspectRatio: false, // アスペクト比を維持しない
                     plugins: {
                         legend: {
                             display: false // 凡例は非表示
@@ -1195,6 +1226,12 @@
                             title: {
                                 display: true,
                                 text: '場所'
+                            },
+                            // ラベルが重なるのを防ぐために回転させる
+                            ticks: {
+                                autoSkip: false,
+                                maxRotation: 90,
+                                minRotation: 90
                             }
                         }
                     }
