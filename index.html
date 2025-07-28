@@ -164,6 +164,20 @@
               <div id="balanceGraphArea" style="margin:1rem 0;"></div>
             </section>
             <section>
+                <h2>場所別支出</h2>
+                <div id="spendingByPlaceGraphArea" style="margin:1rem 0;"></div>
+            </section>
+            <section>
+                <h2>財務健全性スコアとアドバイス</h2>
+                <div style="display:flex; justify-content:center; align-items:center; flex-direction:column; margin-bottom:1rem;">
+                    <div id="financialHealthScoreDisplay" style="font-size:3rem; font-weight:bold; color:var(--primary-color);">--</div>
+                    <p style="font-size:0.9rem; color:#666;">（今月の財務健全性スコア）</p>
+                </div>
+                <div id="financialHealthInsights" style="background-color:var(--background-light); padding:1rem; border-radius:.5rem;">
+                    <p style="text-align:center; color:#999;">データがありません。</p>
+                </div>
+            </section>
+            <section>
                 <h2>履歴</h2>
                  <button id="monthlyReportBtn" style="margin-bottom:1rem;">📊 月次レポートを見る</button>
                 <div id="monthlyReportArea" style="margin-top:1rem; margin-bottom:1rem;"></div>
@@ -319,6 +333,9 @@
                 <label style="display: block;">
                     <input type="checkbox" id="importRolloverGenres" checked> 繰越ジャンル (<span id="importRolloverGenresCount">0</span>件)
                 </label>
+                <label style="display: block;">
+                    <input type="checkbox" id="importPlaceGenreMap" checked> 場所別ジャンル学習データ (<span id="importPlaceGenreMapCount">0</span>件)
+                </label>
             </div>
             <div class="custom-modal-buttons">
                 <button class="confirm-btn" id="importOptionsProceed">インポート</button>
@@ -343,6 +360,9 @@
         let variableExpenseCheckDay = 1;
         let variableExpenseDueDay = 1; // Added initialization for variableExpenseDueDay
         const LOCAL_STORAGE_KEY = 'kakeiboData';
+        const PLACE_GENRE_MAP_KEY = 'placeGenreMap'; // 場所とジャンルの関連性を保存するキー
+        let spendingByPlaceChart = null; // 場所別支出グラフのインスタンスを保持する変数
+        let placeGenreMap = {}; // 場所とジャンルの関連性を保持するオブジェクト
 
         // --- Google Drive API関連 ---
         const API_KEY = 'AIzaSyA8SHDfUl1CWayCmq6oGREjnxWR6R8vPkM'; // ★GitHubに上げる際は必ずプレースホルダーに戻すこと！
@@ -351,6 +371,39 @@
         const SCOPES = 'https://www.googleapis.com/auth/drive.file';
         const BACKUP_FILENAME = 'kakeibo_backup.json';
         let tokenClient, gapiInited = false, gsiInited = false, backupFileId = null;
+
+        // --- Google API初期化コールバック ---
+        // onload属性から直接呼び出せるようにグローバル関数として定義
+        function gapiLoaded() {
+            gapi.load('client', initializeGapiClient);
+        }
+
+        function gisLoaded() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: '', // callback will be set dynamically
+            });
+            gsiInited = true;
+            maybeInitAuth();
+        }
+
+        async function initializeGapiClient() {
+            await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC] });
+            gapiInited = true;
+            maybeInitAuth();
+        }
+
+        function maybeInitAuth() {
+            const authStatus = document.getElementById('auth-status');
+            if (gapiInited && gsiInited) {
+                authStatus.textContent = '未ログイン';
+                document.getElementById('authorize_button').style.visibility = 'visible';
+                if (localStorage.getItem('google_auth_loggedin') === 'true') {
+                   handleAuthClick(true);
+                }
+            }
+        }
 
         // --- カスタムモーダル関数 ---
         function showAlert(message, title = 'お知らせ') {
@@ -389,11 +442,13 @@
             document.getElementById('importGenresCount').textContent = importedData.genres ? importedData.genres.length : 0;
             document.getElementById('importBudgetsCount').textContent = importedData.budgetsByMonth ? Object.keys(importedData.budgetsByMonth).length : 0;
             document.getElementById('importRolloverGenresCount').textContent = importedData.rolloverGenres ? importedData.rolloverGenres.length : 0;
+            document.getElementById('importPlaceGenreMapCount').textContent = importedData.placeGenreMap ? Object.keys(importedData.placeGenreMap).length : 0; // 新しいカウント
 
             document.getElementById('importTransactions').checked = !!importedData.transactions;
             document.getElementById('importGenres').checked = !!importedData.genres;
             document.getElementById('importBudgets').checked = !!importedData.budgetsByMonth;
             document.getElementById('importRolloverGenres').checked = !!importedData.rolloverGenres;
+            document.getElementById('importPlaceGenreMap').checked = !!importedData.placeGenreMap; // 新しいチェックボックス
 
             modal.style.display = 'flex';
 
@@ -403,7 +458,8 @@
                         transactions: document.getElementById('importTransactions').checked,
                         genres: document.getElementById('importGenres').checked,
                         budgetsByMonth: document.getElementById('importBudgets').checked,
-                        rolloverGenres: document.getElementById('importRolloverGenres').checked
+                        rolloverGenres: document.getElementById('importRolloverGenres').checked,
+                        placeGenreMap: document.getElementById('importPlaceGenreMap').checked // 新しい選択項目
                     };
                     modal.style.display = 'none';
                     resolve(selections);
@@ -415,35 +471,6 @@
             });
         }
 
-
-        // --- Google API初期化コールバック ---
-        window.gapiLoaded = () => gapi.load('client', initializeGapiClient);
-        window.gisLoaded = () => {
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: CLIENT_ID,
-                scope: SCOPES,
-                callback: '',
-            });
-            gsiInited = true;
-            maybeInitAuth();
-        };
-
-        async function initializeGapiClient() {
-            await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC] });
-            gapiInited = true;
-            maybeInitAuth();
-        }
-
-        function maybeInitAuth() {
-            const authStatus = document.getElementById('auth-status');
-            if (gapiInited && gsiInited) {
-                authStatus.textContent = '未ログイン';
-                document.getElementById('authorize_button').style.visibility = 'visible';
-                if (localStorage.getItem('google_auth_loggedin') === 'true') {
-                   handleAuthClick(true);
-                }
-            }
-        }
 
         // --- データ管理 ---
         function generateUniqueId() { return Date.now().toString(36) + Math.random().toString(36).substring(2, 9); }
@@ -459,14 +486,22 @@
             accountBalance = parseInt(localStorage.getItem('accountBalance') || '0');
             variableExpenseCheckDay = parseInt(localStorage.getItem('variableExpenseCheckDay') || '1');
             variableExpenseDueDay = parseInt(localStorage.getItem('variableExpenseDueDay') || '1');
+            
+            // 場所とジャンルの関連性マップを読み込む
+            const storedPlaceGenreMap = localStorage.getItem(PLACE_GENRE_MAP_KEY);
+            if (storedPlaceGenreMap) {
+                placeGenreMap = JSON.parse(storedPlaceGenreMap);
+            }
         }
 
         function saveData() {
-            const dataToSave = { transactions, genres, budgetsByMonth, rolloverGenres };
+            const dataToSave = { transactions, genres, budgetsByMonth, rolloverGenres, placeGenreMap }; // placeGenreMapも保存
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(dataToSave));
             localStorage.setItem('accountBalance', accountBalance);
             localStorage.setItem('variableExpenseCheckDay', variableExpenseCheckDay);
             localStorage.setItem('variableExpenseDueDay', variableExpenseDueDay);
+            // 場所とジャンルの関連性マップを保存する
+            localStorage.setItem(PLACE_GENRE_MAP_KEY, JSON.stringify(placeGenreMap));
         }
 
         // --- UI更新 ---
@@ -485,6 +520,8 @@
             updateBudgetTable();
             updateBudgetProgressBars();
             renderBalanceGraph();
+            renderSpendingByPlaceGraph(); // 場所別支出グラフをレンダリング
+            renderFinancialHealthSection(); // 財務健全性スコアとアドバイスをレンダリング
             checkVariableExpensesIfNeeded();
             renderRecurringTransactionsList(); // 新しい関数を呼び出す
         }
@@ -708,6 +745,12 @@
                 const amount = parseInt(item.querySelector('.split-amount').value);
                 if (genre && amount > 0) {
                     recordsToAdd.push({ date, place, type, memo, tags, genre, amount, splitGroupId, timestamp: generateUniqueId() });
+                    // 場所とジャンルの関連性を学習
+                    if (placeGenreMap[place]) {
+                        placeGenreMap[place][genre] = (placeGenreMap[place][genre] || 0) + 1;
+                    } else {
+                        placeGenreMap[place] = { [genre]: 1 };
+                    }
                 }
             });
             if (recordsToAdd.length > 0) {
@@ -806,7 +849,7 @@
         }
 
         async function exportData() {
-            const dataStr = JSON.stringify({ transactions, genres, budgetsByMonth, rolloverGenres }, null, 2);
+            const dataStr = JSON.stringify({ transactions, genres, budgetsByMonth, rolloverGenres, placeGenreMap }, null, 2); // placeGenreMapもエクスポート
             const blob = new Blob([dataStr], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -842,6 +885,14 @@
                         }
                         if (selections.rolloverGenres) {
                             rolloverGenres = importedData.rolloverGenres || [];
+                        }
+                        // インポート時にplaceGenreMapも更新
+                        if (selections.placeGenreMap && importedData.placeGenreMap) { // 選択されていて、データに含まれていれば
+                            placeGenreMap = importedData.placeGenreMap;
+                        } else if (!selections.placeGenreMap) { // 選択されていない場合は現在のデータを維持
+                            // 何もしない
+                        } else { // 選択されたがデータに含まれていない場合
+                            placeGenreMap = {}; // 空にするか、既存のものを維持するかは要件次第だが、ここでは空にする
                         }
                         
                         saveData();
@@ -1022,14 +1073,36 @@
                 balanceTrend.push(currentDayBalance);
             }
 
-            // Y軸の最小値を計算
+            // Y軸の最小値と最大値を計算
             let minBalance;
             if (balanceTrend.length > 0) {
                 minBalance = Math.min(...balanceTrend, startingBalanceForMonth);
             } else {
-                minBalance = startingBalanceForMonth; // If balanceTrend is empty, min is just startingBalanceForMonth
+                minBalance = startingBalanceForMonth;
             }
-            const yAxisMin = Math.floor(minBalance / 1000) * 1000; // 最小値を1000円単位で切り下げ
+            const maxBalance = Math.max(...balanceTrend, startingBalanceForMonth);
+
+            let yAxisMin;
+            const dataRange = maxBalance - minBalance;
+
+            if (dataRange === 0) { // 全ての残高が同じ場合
+                if (minBalance === 0) {
+                    yAxisMin = -1000; // 0の場合は下に少し余白を持たせる
+                } else if (minBalance > 0) {
+                    yAxisMin = minBalance * 0.5; // 正の値の場合はその半分を最小値に
+                } else { // minBalance < 0
+                    yAxisMin = minBalance * 1.5; // 負の値の場合はさらに下に余白を
+                }
+            } else {
+                // データ範囲の10%をバッファとして最小値から引く
+                const buffer = dataRange * 0.1; 
+                yAxisMin = minBalance - buffer;
+            }
+
+            // minBalanceが正の値の場合、yAxisMinが0を下回らないようにする
+            if (minBalance >= 0) {
+                yAxisMin = Math.max(0, yAxisMin);
+            }
 
             // グラフ描画
             new Chart(ctx, {
@@ -1058,6 +1131,76 @@
                 },
             });
         }
+
+        // 場所別支出グラフのレンダリング
+        function renderSpendingByPlaceGraph() {
+            const area = document.getElementById('spendingByPlaceGraphArea');
+            // 既存のチャートがあれば破棄
+            if (spendingByPlaceChart) {
+                spendingByPlaceChart.destroy();
+            }
+            area.innerHTML = '<canvas id="spendingByPlaceChart" style="max-width:100%;"></canvas>';
+            const ctx = document.getElementById('spendingByPlaceChart').getContext('2d');
+
+            // 今月の支出データを場所ごとに集計
+            const spendingByPlace = transactions
+                .filter(t => t.date && t.date.startsWith(currentMonth) && t.type === 'expense')
+                .reduce((acc, t) => {
+                    acc[t.place] = (acc[t.place] || 0) + t.amount;
+                    return acc;
+                }, {});
+
+            const labels = Object.keys(spendingByPlace);
+            const data = Object.values(spendingByPlace);
+
+            // データがない場合はメッセージを表示
+            if (labels.length === 0) {
+                area.innerHTML = '<p style="text-align:center; color:#666;">今月の場所別支出データはありません。</p>';
+                return;
+            }
+
+            // グラフ描画
+            spendingByPlaceChart = new Chart(ctx, {
+                type: 'bar', // 棒グラフを使用
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '支出額',
+                        data: data,
+                        backgroundColor: 'rgba(75, 192, 192, 0.6)', // 棒の色
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: false // 凡例は非表示
+                        },
+                        title: {
+                            display: true,
+                            text: '場所別支出' // グラフタイトル
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true, // Y軸は0から開始
+                            title: {
+                                display: true,
+                                text: '金額 (円)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '場所'
+                            }
+                        }
+                    }
+                }
+            });
+        }
         
         async function checkVariableExpensesIfNeeded() {
             const today = new Date();
@@ -1074,6 +1217,10 @@
             }
         }
 
+        /**
+         * 指定された月の固定支出を生成します。
+         * @param {string} month - YYYY-MM形式の月。
+         */
         function addFixedExpensesForMonth(month) {
             genres.filter(g => g.type === 'fixed').forEach(g => {
                 const budget = budgetsByMonth[month]?.[g.name];
@@ -1098,6 +1245,10 @@
             saveData();
         }
 
+        /**
+         * 指定された月の変動支出を生成します。
+         * @param {string} month - YYYY-MM形式の月。
+         */
         function addVariableExpensesForMonth(month) {
             genres.filter(g => g.type === 'variable').forEach(g => {
                 const budget = budgetsByMonth[month]?.[g.name];
@@ -1122,6 +1273,168 @@
             saveData();
         }
 
+        /**
+         * 予算の繰越ロジックを適用します。
+         * 前月の予算残高（余剰または不足）を当月の予算に反映させます。
+         * @param {string} newMonth - 当月 (YYYY-MM形式)。
+         */
+        function applyBudgetRollover(newMonth) {
+            const prevMonthDate = new Date(newMonth + '-01');
+            prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+            const prevMonth = prevMonthDate.toISOString().slice(0, 7);
+
+            // 当月の予算がまだ存在しない場合は初期化
+            if (!budgetsByMonth[newMonth]) {
+                budgetsByMonth[newMonth] = {};
+            }
+
+            rolloverGenres.forEach(genreName => {
+                const prevMonthBudget = budgetsByMonth[prevMonth]?.[genreName] || 0;
+                const prevMonthSpent = transactions
+                    .filter(t => t.date && t.date.startsWith(prevMonth) && t.genre === genreName && t.type === 'expense')
+                    .reduce((sum, t) => sum + t.amount, 0);
+                
+                const rolloverAmount = prevMonthBudget - prevMonthSpent;
+
+                // 当月の予算に繰越額を加算
+                // 当月にそのジャンルの予算が設定されていない場合は、繰越額がそのまま予算となる
+                budgetsByMonth[newMonth][genreName] = (budgetsByMonth[newMonth][genreName] || 0) + rolloverAmount;
+            });
+            saveData();
+        }
+
+        // --- 財務健全性スコアとアドバイスのレンダリング ---
+        function renderFinancialHealthSection() {
+            const scoreDisplay = document.getElementById('financialHealthScoreDisplay');
+            const insightsDisplay = document.getElementById('financialHealthInsights');
+            
+            const { score, insights } = calculateFinancialHealthScoreAndInsights();
+
+            scoreDisplay.textContent = `${Math.round(score)}点`;
+            
+            if (insights.length > 0) {
+                insightsDisplay.innerHTML = insights.map(insight => `<p style="margin-bottom:0.5rem;">${insight}</p>`).join('');
+            } else {
+                insightsDisplay.innerHTML = '<p style="text-align:center; color:#999;">今月の財務健全性に関するデータがまだありません。</p>';
+            }
+        }
+
+        /**
+         * 財務健全性スコアとアドバイスを計算します。
+         * @returns {{score: number, insights: string[]}} スコアとアドバイスの配列
+         */
+        function calculateFinancialHealthScoreAndInsights() {
+            let score = 100; // 初期スコア
+            const insights = [];
+            const currentMonthExpenses = transactions.filter(t => t.date && t.date.startsWith(currentMonth) && t.type === 'expense');
+            const currentMonthIncome = transactions.filter(t => t.date && t.date.startsWith(currentMonth) && t.type === 'income');
+
+            const monthlyBudget = budgetsByMonth[currentMonth] || {};
+
+            // 1. 予算達成度 (Budget Adherence)
+            const currentMonthExpensesByGenre = currentMonthExpenses.reduce((acc, t) => {
+                acc[t.genre] = (acc[t.genre] || 0) + t.amount;
+                return acc;
+            }, {});
+
+            let totalBudget = 0;
+            let totalSpent = 0;
+
+            Object.keys(monthlyBudget).forEach(genre => {
+                const budget = monthlyBudget[genre];
+                const spent = currentMonthExpensesByGenre[genre] || 0;
+                totalBudget += budget;
+                totalSpent += spent;
+
+                const difference = budget - spent;
+                if (difference < 0) { // 予算オーバー
+                    const overagePercentage = Math.abs(difference) / budget * 100;
+                    score -= Math.min(20, Math.round(overagePercentage / 5)); // 5%オーバーごとに1点減点、最大20点
+                    insights.push(`⚠️ ${genre}が予算を${new Intl.NumberFormat().format(Math.abs(difference))}円オーバーしています。`);
+                } else if (difference > 0 && budget > 0) { // 予算内、かつ予算が設定されている場合
+                    insights.push(`✨ ${genre}で${new Intl.NumberFormat().format(difference)}円の節約に成功しています。`);
+                }
+            });
+
+            // 全体予算の評価
+            if (totalBudget > 0) {
+                const overallDifference = totalBudget - totalSpent;
+                if (overallDifference < 0) {
+                    const overagePercentage = Math.abs(overallDifference) / totalBudget * 100;
+                    score -= Math.min(30, Math.round(overagePercentage / 3)); // 全体予算オーバーは重く減点
+                    insights.push(`🚨 今月は全体で予算を${new Intl.NumberFormat().format(Math.abs(overallDifference))}円オーバーしています。`);
+                } else if (overallDifference > 0) {
+                    insights.push(`✅ 今月は全体で${new Intl.NumberFormat().format(overallDifference)}円の節約ができています！`);
+                }
+            } else {
+                insights.push('💡 今月の予算が設定されていません。予算を設定すると、より詳細な分析が可能です。');
+            }
+
+
+            // 2. 支出の安定性 (Spending Stability) - 過去3ヶ月の平均と比較
+            const threeMonthsAgo = new Date(currentMonth + '-01');
+            threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+            const recentMonths = [];
+            for (let i = 0; i < 3; i++) {
+                const d = new Date(threeMonthsAgo);
+                d.setMonth(d.getMonth() + i);
+                recentMonths.push(d.toISOString().slice(0, 7));
+            }
+
+            const keyCategories = genres.filter(g => g.type === '').map(g => g.name); // 通常ジャンルを対象
+            const historicalSpending = {}; // { genre: { month: amount } }
+
+            transactions.filter(t => recentMonths.includes(t.date.slice(0, 7)) && t.type === 'expense').forEach(t => {
+                if (!historicalSpending[t.genre]) historicalSpending[t.genre] = {};
+                const monthKey = t.date.slice(0, 7);
+                historicalSpending[t.genre][monthKey] = (historicalSpending[t.genre][monthKey] || 0) + t.amount;
+            });
+
+            keyCategories.forEach(genre => {
+                const currentSpending = currentMonthExpensesByGenre[genre] || 0;
+                const pastSpendings = recentMonths.map(month => historicalSpending[genre]?.[month] || 0);
+                const pastAverage = pastSpendings.reduce((sum, val) => sum + val, 0) / pastSpendings.length;
+
+                if (pastAverage > 0 && currentSpending > pastAverage * 1.2) { // 20%以上増加
+                    const increasePercentage = ((currentSpending - pastAverage) / pastAverage * 100).toFixed(0);
+                    score -= Math.min(15, Math.round(increasePercentage / 10)); // 10%増加ごとに1点減点、最大15点
+                    insights.push(`📈 ${genre}の支出が過去3ヶ月平均より${increasePercentage}%増加しています。`);
+                } else if (pastAverage > 0 && currentSpending < pastAverage * 0.8) { // 20%以上減少
+                    const decreasePercentage = ((pastAverage - currentSpending) / pastAverage * 100).toFixed(0);
+                    insights.push(`📉 ${genre}の支出が過去3ヶ月平均より${decreasePercentage}%減少しています。素晴らしい！`);
+                }
+            });
+
+            // 3. 収入と支出のバランス (Income vs Expense)
+            const totalCurrentMonthIncome = currentMonthIncome.reduce((sum, t) => sum + t.amount, 0);
+            const totalCurrentMonthExpense = currentMonthExpenses.reduce((sum, t) => sum + t.amount, 0);
+
+            if (totalCurrentMonthIncome > 0) {
+                const savingRate = (totalCurrentMonthIncome - totalCurrentMonthExpense) / totalCurrentMonthIncome * 100;
+                if (savingRate < 0) {
+                    score -= Math.min(20, Math.round(Math.abs(savingRate) / 2)); // 赤字は重く減点
+                    insights.push(`💔 今月は${new Intl.NumberFormat().format(Math.abs(totalCurrentMonthIncome - totalCurrentMonthExpense))}円の赤字です。支出を見直しましょう。`);
+                } else if (savingRate < 10) {
+                    insights.push(`🤔 貯蓄率は${savingRate.toFixed(0)}%です。もう少し貯蓄を増やせるかもしれません。`);
+                } else {
+                    insights.push(`💰 貯蓄率は${savingRate.toFixed(0)}%と健全です！この調子で貯蓄を続けましょう。`);
+                }
+            } else {
+                insights.push('💡 今月の収入が記録されていません。収入を記録すると、より正確な財務健全性評価が可能です。');
+            }
+
+            // スコアを0-100の範囲に収める
+            score = Math.max(0, Math.min(100, score));
+
+            // ポジティブなフィードバックが少ない場合は追加
+            if (insights.length === 0 || insights.every(i => i.startsWith('⚠️') || i.startsWith('🚨') || i.startsWith('📈') || i.startsWith('💔') || i.startsWith('🤔'))) {
+                insights.push('✨ 今月は全体的に良好な家計管理ができています。素晴らしい！');
+            }
+
+            return { score, insights };
+        }
+
+
         // --- 定期的な取引リストのレンダリング ---
         function renderRecurringTransactionsList() {
             const listDiv = document.getElementById('recurringTransactionsList');
@@ -1136,7 +1449,8 @@
             let html = '<ul style="list-style:none; padding:0;">';
             recurringGenres.forEach(g => {
                 const typeText = g.type === 'fixed' ? '固定' : '変動';
-                const dueDayText = g.dueDay ? `毎月${g.dueDay}日` : (g.type === 'fixed' ? '毎月1日' : `毎月${variableExpenseDueDay}日 (全体設定)`);
+                const dueDay = g.dueDay || (g.type === 'fixed' ? 1 : variableExpenseDueDay); // ジャンルごとの発生日を優先、なければデフォルト
+                const dueDayText = `毎月${dueDay}日` + (g.dueDay ? '' : ' (全体設定)');
                 const budget = budgetsByMonth[currentMonth]?.[g.name] || 0;
                 const transactionExists = transactions.some(t => 
                     t.date && t.date.startsWith(currentMonth) && 
@@ -1167,6 +1481,30 @@
             document.getElementById('settingsTab').addEventListener('click', () => switchTab('settings'));
             document.getElementById('recordForm').addEventListener('submit', handleRecordSubmit);
             document.getElementById('add-split-item-btn').addEventListener('click', () => addSplitItemRow(document.getElementById('split-items-container')));
+            
+            // 場所入力フィールドの変更を監視してジャンルを自動補完
+            document.getElementById('place').addEventListener('input', (e) => {
+                const placeInput = e.target.value.trim();
+                if (placeInput && placeGenreMap[placeInput]) {
+                    const genresForPlace = placeGenreMap[placeInput];
+                    let bestGenre = '';
+                    let maxCount = 0;
+                    for (const genre in genresForPlace) {
+                        if (genresForPlace[genre] > maxCount) {
+                            maxCount = genresForPlace[genre];
+                            bestGenre = genre;
+                        }
+                    }
+                    if (bestGenre) {
+                        // 既存の分割項目があれば、そのジャンルを更新
+                        const firstSplitGenreSelect = document.querySelector('.split-genre');
+                        if (firstSplitGenreSelect) {
+                            firstSplitGenreSelect.value = bestGenre;
+                        }
+                    }
+                }
+            });
+
             document.getElementById('addGenreBtn').addEventListener('click', addGenre);
             document.getElementById('setBudgetBtn').addEventListener('click', setBudget);
             document.getElementById('copyBudgetBtn').addEventListener('click', copyLastMonthBudget);
@@ -1174,6 +1512,7 @@
                 const newMonth = e.target.value;
                 if (newMonth !== currentMonth) {
                     currentMonth = newMonth;
+                    applyBudgetRollover(currentMonth); // 予算繰越を適用
                     addFixedExpensesForMonth(currentMonth); // 固定費を追加
                     addVariableExpensesForMonth(currentMonth); // 変動費を追加
                     renderApp();
@@ -1263,8 +1602,9 @@
             updateSplitTotal();
             document.getElementById('date').valueAsDate = new Date();
             
-            addFixedExpensesForMonth(currentMonth); // 初期読み込み時に固定費をチェック
-            addVariableExpensesForMonth(currentMonth); // 初期読み込み時に変動費をチェック (added)
+            // 初期読み込み時に固定費と変動費をチェック
+            addFixedExpensesForMonth(currentMonth);
+            addVariableExpensesForMonth(currentMonth);
             switchTab('home');
             renderApp();
         });
