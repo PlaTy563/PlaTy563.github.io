@@ -9,8 +9,33 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script type="module">
+        // GoogleGenerativeAIはモジュールとしてインポート
         import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
         window.GoogleGenerativeAI = GoogleGenerativeAI;
+    </script>
+    <script>
+        // gapiLoadedとgisLoadedはonload属性から呼び出されるため、グローバルスコープで定義
+        let tokenClient, gapiInited = false, gsiInited = false, backupFileId = null;
+
+        function gapiLoaded() {
+            gapi.load('client', initializeGapiClient);
+        }
+
+        function gisLoaded() {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: '', // callback will be set dynamically
+            });
+            gsiInited = true;
+            maybeInitAuth();
+        }
+
+        async function initializeGapiClient() {
+            await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC] });
+            gapiInited = true;
+            maybeInitAuth();
+        }
     </script>
     <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
     <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
@@ -120,7 +145,7 @@
 
         /* 新しいスクロールコンテナのスタイル */
         .scroll-graph-container {
-            overflow-x: auto;
+            overflow-x: auto; /* 横スクロールを有効にする */
             width: 100%; /* 親要素の幅に合わせる */
             padding-bottom: 15px; /* スクロールバーのための余白 */
         }
@@ -163,6 +188,16 @@
                 <h2>
                     <input type="month" id="monthSelector" style="font-size:1.25rem;border:none;padding-left:0;width:auto;">の状況
                 </h2>
+                <div id="budgetSortControls" style="display:flex; gap: 8px; margin-bottom: 1rem; align-items: center;">
+                    <label for="budgetSortBy" style="font-size: 0.9rem; margin-right: 4px;">並べ替え:</label>
+                    <select id="budgetSortBy" style="flex: 1; padding: 0.5rem; font-size: 0.9rem; min-height: unset; margin-bottom: 0;">
+                        <option value="genre">ジャンル</option>
+                        <option value="budget">予算</option>
+                        <option value="spent">支出</option>
+                        <option value="remaining">残額</option>
+                    </select>
+                    <button id="budgetSortDirection" style="width: auto; padding: 0.5rem 0.75rem; font-size: 0.9rem; min-height: unset; margin-bottom: 0;">▲</button>
+                </div>
                 <div id="budgetTableArea" style="margin-bottom:1rem;"></div>
                  <div id="budgetProgressBars" style="margin-top:1.5rem;"></div>
                 <div class="calendar-grid-container" style="margin-top:1.5rem;"></div>
@@ -375,6 +410,8 @@
         const PLACE_GENRE_MAP_KEY = 'placeGenreMap'; // 場所とジャンルの関連性を保存するキー
         let spendingByPlaceChart = null; // 場所別支出グラフのインスタンスを保持する変数
         let placeGenreMap = {}; // 場所とジャンルの関連性を保持するオブジェクト
+        let budgetSortColumn = 'genre'; // Default sort column
+        let budgetSortDirection = 'asc'; // Default sort direction
 
         // --- Google Drive API関連 ---
         const API_KEY = 'AIzaSyA8SHDfUl1CWayCmq6oGREjnxWR6R8vPkM'; // ★GitHubに上げる際は必ずプレースホルダーに戻すこと！
@@ -382,29 +419,11 @@
         const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
         const SCOPES = 'https://www.googleapis.com/auth/drive.file';
         const BACKUP_FILENAME = 'kakeibo_backup.json';
-        let tokenClient, gapiInited = false, gsiInited = false, backupFileId = null;
+        // tokenClient, gapiInited, gsiInited, backupFileId はグローバルで定義済み
 
-        // --- Google API初期化コールバック ---
-        // onload属性から直接呼び出せるようにグローバル関数として定義
-        window.gapiLoaded = function() { // 修正: windowに明示的に割り当て
-            gapi.load('client', initializeGapiClient);
-        }
-
-        window.gisLoaded = function() { // 修正: windowに明示的に割り当て
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: CLIENT_ID,
-                scope: SCOPES,
-                callback: '', // callback will be set dynamically
-            });
-            gsiInited = true;
-            maybeInitAuth();
-        }
-
-        async function initializeGapiClient() {
-            await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC] });
-            gapiInited = true;
-            maybeInitAuth();
-        }
+        // --- Google API初期化コールバック (グローバルスコープに移動) ---
+        // gapiLoaded, gisLoaded, initializeGapiClient はHTMLのhead内のscriptタグで定義済み
+        // window.gapiLoaded = function() { ... } と window.gisLoaded = function() { ... } は削除済み
 
         function maybeInitAuth() {
             const authStatus = document.getElementById('auth-status');
@@ -679,17 +698,50 @@
         function updateBudgetTable() {
             const area = document.getElementById('budgetTableArea');
             const monthlyBudget = budgetsByMonth[currentMonth] || {};
-            let html = '<table style="width:100%;border-collapse:collapse;"><thead><tr><th>ジャンル</th><th>予算</th><th>支出</th><th>残額</th></tr></thead><tbody>';
-            Object.keys(monthlyBudget).forEach(genre => {
-                const budget = monthlyBudget[genre];
+            
+            // 予算データを配列に変換
+            const budgetData = Object.keys(monthlyBudget).map(genreName => {
+                const budget = monthlyBudget[genreName];
                 const spent = transactions
-                    .filter(t => t.date && t.date.startsWith(currentMonth) && t.genre === genre && t.type === 'expense')
+                    .filter(t => t.date && t.date.startsWith(currentMonth) && t.genre === genreName && t.type === 'expense')
                     .reduce((sum, t) => sum + t.amount, 0);
+                const remaining = budget - spent;
+                return { genre: genreName, budget, spent, remaining };
+            });
+
+            // ソートロジック
+            budgetData.sort((a, b) => {
+                let valA, valB;
+                switch (budgetSortColumn) {
+                    case 'genre':
+                        valA = a.genre;
+                        valB = b.genre;
+                        return budgetSortDirection === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                    case 'budget':
+                        valA = a.budget;
+                        valB = b.budget;
+                        break;
+                    case 'spent':
+                        valA = a.spent;
+                        valB = b.spent;
+                        break;
+                    case 'remaining':
+                        valA = a.remaining;
+                        valB = b.remaining;
+                        break;
+                    default:
+                        return 0; // No sort
+                }
+                return budgetSortDirection === 'asc' ? valA - valB : valB - valA;
+            });
+
+            let html = '<table style="width:100%;border-collapse:collapse;"><thead><tr><th>ジャンル</th><th>予算</th><th>支出</th><th>残額</th></tr></thead><tbody>';
+            budgetData.forEach(item => {
                 html += `<tr>
-                    <td>${genre}</td>
-                    <td>${new Intl.NumberFormat().format(budget)}円</td>
-                    <td>${new Intl.NumberFormat().format(spent)}円</td> <!-- 文字色を変更 -->
-                    <td>${new Intl.NumberFormat().format(budget - spent)}円</td>
+                    <td>${item.genre}</td>
+                    <td>${new Intl.NumberFormat().format(item.budget)}円</td>
+                    <td>${new Intl.NumberFormat().format(item.spent)}円</td>
+                    <td>${new Intl.NumberFormat().format(item.remaining)}円</td>
                 </tr>`;
             });
             html += '</tbody></table>';
@@ -723,7 +775,7 @@
         function updateGenreOptions(selectElement) {
             const currentVal = selectElement.value;
             selectElement.innerHTML = '';
-            genres.filter(g => !['給与', 'その他収入'].includes(g.name)).forEach(g => {
+            genres.forEach(g => {
                 const option = document.createElement('option');
                 option.value = g.name;
                 option.textContent = g.name;
@@ -1063,6 +1115,8 @@
             const [year, month] = currentMonth.split('-').map(Number);
             const daysInMonth = new Date(year, month, 0).getDate();
 
+            let balanceTrend = []; // Moved this line to the top of the function.
+
             // 日ごとの支出・収入集計
             let dailyChange = Array(daysInMonth).fill(0);
             transactions.filter(t => t.date && t.date.startsWith(currentMonth)).forEach(t => {
@@ -1071,8 +1125,6 @@
             });
 
             // 残高推移計算 (修正: 初日の残高から計算を開始)
-            let balanceTrend = [];
-            // 今月の初日時点での残高を計算
             let startingBalanceForMonth = accountBalance;
             // 当月より前の取引の差額を計算
             transactions.filter(t => t.date && t.date < `${currentMonth}-01`).forEach(t => {
@@ -1087,12 +1139,16 @@
 
             // Y軸の最小値と最大値を計算
             let minBalance;
+            let maxBalance; 
+
             if (balanceTrend.length > 0) {
                 minBalance = Math.min(...balanceTrend, startingBalanceForMonth);
+                maxBalance = Math.max(...balanceTrend, startingBalanceForMonth);
             } else {
+                // balanceTrendが空の場合の処理を明確にする
                 minBalance = startingBalanceForMonth;
+                maxBalance = startingBalanceForMonth;
             }
-            const maxBalance = Math.max(...balanceTrend, startingBalanceForMonth);
 
             let yAxisMin;
             const dataRange = maxBalance - minBalance;
@@ -1181,9 +1237,19 @@
             
             // データ量に応じてCanvasの幅を動的に設定
             // 1項目あたり約80pxの幅を確保 (バーの幅 + パディング + ラベルスペース)
-            const minWidth = Math.max(area.offsetWidth, labels.length * 80); 
-            canvas.style.width = `${minWidth}px`;
-            canvas.style.height = '300px'; // 高さは固定
+            const requiredWidth = labels.length * 80; 
+            
+            // Canvasの描画バッファサイズを設定
+            // 親コンテナの現在の表示幅と、グラフが必要とする最小幅の大きい方を使用
+            canvas.width = Math.max(area.offsetWidth, requiredWidth); 
+            canvas.height = 300; // 描画バッファの高さは固定
+
+            // Canvasの表示スタイルを設定
+            // scrollContainerの幅いっぱいに広がり、必要に応じてmaxWidthでコンテンツの最小幅を保証
+            canvas.style.display = 'block';
+            canvas.style.width = '100%'; 
+            canvas.style.maxWidth = `${canvas.width}px`; // これが重要。canvasが小さくなりすぎないようにする
+            canvas.style.height = '300px'; 
 
             scrollContainer.appendChild(canvas);
             const ctx = canvas.getContext('2d');
@@ -1203,7 +1269,7 @@
                     }]
                 },
                 options: {
-                    responsive: false, // 親要素の幅に合わせない（スクロールのため）
+                    responsive: false, // Chart.jsがCanvasのCSS幅ではなく、Canvas要素のwidth/height属性を使用するようにする
                     maintainAspectRatio: false, // アスペクト比を維持しない
                     plugins: {
                         legend: {
@@ -1631,6 +1697,18 @@
                     renderApp();
                     await showAlert('今月の定期取引を生成しました。');
                 }
+            });
+
+            // 並べ替えコントロールのイベントリスナー
+            document.getElementById('budgetSortBy').addEventListener('change', (e) => {
+                budgetSortColumn = e.target.value;
+                renderApp();
+            });
+
+            document.getElementById('budgetSortDirection').addEventListener('click', (e) => {
+                budgetSortDirection = budgetSortDirection === 'asc' ? 'desc' : 'asc';
+                e.target.textContent = budgetSortDirection === 'asc' ? '▲' : '▼';
+                renderApp();
             });
 
 
