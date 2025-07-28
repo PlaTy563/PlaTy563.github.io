@@ -180,6 +180,23 @@
         </form>
     </div>
     <div id="modalOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:999;"></div>
+    <div id="editGenreModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%, -50%);background:#fff;padding:1rem;border-radius:8px;box-shadow:0 4px 6px rgba(0,0,0,0.1);z-index:1000;">
+        <h2>ジャンルの編集</h2>
+        <form id="editGenreForm">
+            <label>ジャンル名: <input type="text" id="editGenreName" required></label><br>
+            <label>ジャンルタイプ: 
+                <select id="editGenreType">
+                    <option value="">通常</option>
+                    <option value="fixed">定期（固定）</option>
+                    <option value="variable">定期（変動）</option>
+                </select>
+            </label><br>
+            <label>発生日: <input type="number" id="editGenreDueDay" min="1" max="31" placeholder="発生日 (任意)"></label><br>
+            <button type="submit">保存</button>
+            <button type="button" id="cancelEditGenreBtn">キャンセル</button>
+        </form>
+    </div>
+    <div id="editGenreOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:999;"></div>
 
     <script>
         // --- グローバル変数 ---
@@ -256,7 +273,7 @@
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(dataToSave));
             localStorage.setItem('accountBalance', accountBalance);
             localStorage.setItem('variableExpenseCheckDay', variableExpenseCheckDay);
-            localStorage.setItem('variableExpenseDueDay', variableExpenseDueDay); // Save variableExpenseDueDay
+            localStorage.setItem('variableExpenseDueDay', variableExpenseDueDay);
         }
 
         // --- UI更新 ---
@@ -288,10 +305,12 @@
         function updateGenreManagementList() {
             const genreListDiv = document.getElementById('genreList');
             genreListDiv.innerHTML = '';
-            genres.forEach(g => {
+            genres.forEach((g, index) => {
                 const isRolloverEnabled = rolloverGenres.includes(g.name);
                 const itemDiv = document.createElement('div');
                 itemDiv.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:4px;border-bottom:1px solid var(--border-color-light)';
+                itemDiv.setAttribute('draggable', 'true');
+                itemDiv.setAttribute('data-index', index);
                 itemDiv.innerHTML = `
                     <span>${g.name || ''} (${g.type || '通常'})</span>
                     <div style="display:flex;align-items:center;gap:8px;">
@@ -299,13 +318,50 @@
                         <label style="font-size:0.8rem;">
                             <input type="checkbox" class="rollover-checkbox" data-genre="${g.name}" ${isRolloverEnabled ? 'checked' : ''}> 繰越
                         </label>
+                        <button class="edit-genre-btn" data-index="${index}" style="width:auto;padding:2px 6px;background-color:#4caf50;color:#fff;">編集</button>
                         <button class="delete-btn" data-genre="${g.name}" style="width:auto;padding:2px 6px;background-color:#ef4444;">&times;</button>
                     </div>`;
                 genreListDiv.appendChild(itemDiv);
 
-                itemDiv.querySelector('.delete-btn').addEventListener('click', e => deleteGenre(e.target.dataset.genre));
-                itemDiv.querySelector('.rollover-checkbox').addEventListener('change', e => handleRolloverChange(e.target.dataset.genre, e.target.checked));
-                itemDiv.querySelector('.genre-due-day').addEventListener('change', e => updateGenreDueDay(e.target.dataset.genre, e.target.value));
+                // イベントリスナーを追加
+                itemDiv.querySelector('.edit-genre-btn').addEventListener('click', (e) => openEditGenreModal(e.target.dataset.index));
+                itemDiv.querySelector('.delete-btn').addEventListener('click', (e) => deleteGenre(e.target.dataset.genre));
+                itemDiv.querySelector('.rollover-checkbox').addEventListener('change', (e) => handleRolloverChange(e.target.dataset.genre, e.target.checked));
+                itemDiv.querySelector('.genre-due-day').addEventListener('change', (e) => updateGenreDueDay(e.target.dataset.genre, e.target.value));
+            });
+        }
+
+        let draggedItemIndex = null;
+
+        function handleDragStart(e) {
+            draggedItemIndex = parseInt(e.target.getAttribute('data-index'));
+            e.target.style.opacity = '0.5'; // ドラッグ中のアイテムを半透明にする
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault(); // ドロップを許可する
+            e.target.style.border = '2px dashed var(--primary-color)'; // ドラッグ中のアイテムの上に枠線を表示
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            const targetIndex = parseInt(e.target.closest('[data-index]').getAttribute('data-index'));
+            if (draggedItemIndex !== null && targetIndex !== null && draggedItemIndex !== targetIndex) {
+                // ジャンルの順序を入れ替える
+                const draggedItem = genres[draggedItemIndex];
+                genres.splice(draggedItemIndex, 1);
+                genres.splice(targetIndex, 0, draggedItem);
+
+                // データを保存してUIを更新
+                saveData();
+                updateGenreManagementList();
+            }
+        }
+
+        function handleDragEnd(e) {
+            e.target.style.opacity = '1'; // ドラッグ終了後に透明度を元に戻す
+            document.querySelectorAll('[data-index]').forEach(item => {
+                item.style.border = ''; // 枠線を消す
             });
         }
 
@@ -374,7 +430,12 @@
                 const spent = transactions
                     .filter(t => t.date && t.date.startsWith(currentMonth) && t.genre === genre && t.type === 'expense')
                     .reduce((sum, t) => sum + t.amount, 0);
-                html += `<tr><td>${genre}</td><td>${new Intl.NumberFormat().format(budget)}円</td><td style="color:${spent>budget?'red':'black'};">${new Intl.NumberFormat().format(spent)}円</td><td>${new Intl.NumberFormat().format(budget-spent)}円</td></tr>`;
+                html += `<tr>
+                    <td>${genre}</td>
+                    <td>${new Intl.NumberFormat().format(budget)}円</td>
+                    <td>${new Intl.NumberFormat().format(spent)}円</td> <!-- 文字色を変更 -->
+                    <td>${new Intl.NumberFormat().format(budget - spent)}円</td>
+                </tr>`;
             });
             html += '</tbody></table>';
             area.innerHTML = html;
@@ -982,8 +1043,68 @@
             alert('履歴を更新しました。');
         }
 
-        function safeValue(value, defaultValue = '') {
-            return value !== undefined && value !== null ? value : defaultValue;
+        function openEditGenreModal(index) {
+            const genre = genres[index];
+            if (!genre) return;
+
+            // モーダルを表示
+            document.getElementById('editGenreModal').style.display = 'block';
+            document.getElementById('editGenreOverlay').style.display = 'block';
+
+            // フォームにデータをセット
+            document.getElementById('editGenreName').value = genre.name || '';
+            document.getElementById('editGenreType').value = genre.type || '';
+            document.getElementById('editGenreDueDay').value = genre.dueDay || '';
+
+            // 保存ボタンの動作を設定
+            const form = document.getElementById('editGenreForm');
+            form.onsubmit = (e) => {
+                e.preventDefault();
+                saveEditedGenre(index);
+            };
+
+            // キャンセルボタンの動作を設定
+            document.getElementById('cancelEditGenreBtn').onclick = () => {
+                document.getElementById('editGenreModal').style.display = 'none';
+                document.getElementById('editGenreOverlay').style.display = 'none';
+            };
+        }
+
+        function saveEditedGenre(index) {
+            const genre = genres[index];
+            if (!genre) return;
+
+            const oldName = genre.name;
+            const newName = document.getElementById('editGenreName').value.trim();
+            const newType = document.getElementById('editGenreType').value;
+            const newDueDay = parseInt(document.getElementById('editGenreDueDay').value) || null;
+
+            // データを更新
+            genre.name = newName;
+            genre.type = newType;
+            genre.dueDay = newDueDay;
+
+            // 関連データを更新
+            transactions.forEach(t => {
+                if (t.genre === oldName) t.genre = newName;
+            });
+
+            Object.keys(budgetsByMonth).forEach(month => {
+                if (budgetsByMonth[month][oldName]) {
+                    budgetsByMonth[month][newName] = budgetsByMonth[month][oldName];
+                    delete budgetsByMonth[month][oldName];
+                }
+            });
+
+            // データを保存してUIを更新
+            saveData();
+            renderApp();
+
+            // モーダルを閉じる
+            document.getElementById('editGenreModal').style.display = 'none';
+            document.getElementById('editGenreOverlay').style.display = 'none';
+
+            alert('ジャンルを更新しました。');
         }
     </script>
 </body>
