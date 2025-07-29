@@ -211,7 +211,7 @@
               <div id="balanceGraphArea" style="margin:1rem 0;"></div>
             </section>
             <section>
-                <h2>場所別支出</h2>
+                    <h2>場所別支出</h2>
                 <div style="display:flex; gap: 8px; margin-bottom: 1rem; align-items: center;">
                     <label for="spendingPlaceLimit" style="font-size: 0.9rem; margin-right: 4px;">表示項目数:</label>
                     <input type="number" id="spendingPlaceLimit" value="10" min="1" style="flex: 1; padding: 0.5rem; font-size: 0.9rem; min-height: unset; margin-bottom: 0;">
@@ -417,7 +417,7 @@
         let placeGenreMap = {}; // 場所とジャンルの関連性を保持するオブジェクト
         let budgetSortColumn = 'genre'; // Default sort column
         let budgetSortDirection = 'asc'; // Default sort direction
-        let spendingPlaceLimit = 10; // 場所別支出グラフの表示項目数
+        let spendingPlaceLimit = 3; // 場所別支出グラフの表示項目数
 
         // --- Google Drive API関連 ---
         const API_KEY = 'AIzaSyA8SHDfUl1CWayCmq6oGREjnxWR6R8vPkM'; // ★GitHubに上げる際は必ずプレースホルダーに戻すこと！
@@ -1029,16 +1029,56 @@
                 const file = files[0];
                 statusDiv.textContent = `${file.name} を読み取り中...`;
 
+                let base64Image;
+                try {
+                    base64Image = await fileToBase64(file);
+                } catch (fileError) {
+                    console.error("OCR処理エラー: ファイルのBase64変換に失敗しました。", fileError);
+                    await showAlert('レシート画像の読み込みに失敗しました。ファイルが破損しているか、形式が正しくありません。', 'エラー');
+                    return;
+                }
+
                 const genAI = new window.GoogleGenerativeAI(apiKey);
                 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
                 const prompt = `この1枚の画像に写っている全てのレシートを個別に認識し、各レシートから以下の情報を抽出し、必ずJSONの配列（リスト）形式で回答してください。- place: 店名 (文字列) - date: 日付 (YYYY-MM-DD形式の文字列) - total: 合計金額 (数値)`;
                 const imagePart = { inlineData: { data: base64Image, mimeType: file.type } };
-                const result = await model.generateContent([prompt, imagePart]);
-                const responseText = result.response.text().replace(/```json|```/g, '').trim();
-                const resultsArray = JSON.parse(responseText);
+                
+                let result;
+                try {
+                    result = await model.generateContent([prompt, imagePart]);
+                } catch (apiError) {
+                    console.error("OCR処理エラー: Gemini API呼び出しに失敗しました。", apiError);
+                    let errorMessage = 'Gemini APIとの通信中にエラーが発生しました。';
+                    if (apiError.message && apiError.message.includes('API key not valid')) {
+                        errorMessage += ' APIキーが不正な可能性があります。設定を確認してください。';
+                    } else if (apiError.message && apiError.message.includes('quota')) {
+                        errorMessage += ' APIの使用制限に達した可能性があります。';
+                    }
+                    await showAlert(errorMessage, 'エラー');
+                    return;
+                }
+
+                let responseText;
+                try {
+                    responseText = result.response.text().replace(/```json|```/g, '').trim();
+                } catch (textError) {
+                    console.error("OCR処理エラー: APIレスポンスのテキスト抽出に失敗しました。", textError);
+                    await showAlert('APIからの応答が予期せぬ形式でした。', 'エラー');
+                    return;
+                }
+
+                let resultsArray;
+                try {
+                    resultsArray = JSON.parse(responseText);
+                } catch (parseError) {
+                    console.error("OCR処理エラー: JSONパースに失敗しました。APIレスポンス:", responseText, parseError);
+                    await showAlert('レシート情報の解析に失敗しました。APIからの応答が正しいJSON形式ではありませんでした。', 'エラー');
+                    return;
+                }
 
                 if (resultsArray.length === 0) {
                     statusDiv.textContent = '画像からレシートを検出できませんでした。';
+                    await showAlert('画像からレシートを検出できませんでした。より鮮明な画像をお試しください。', '情報');
                     return;
                 }
 
@@ -1063,9 +1103,9 @@
                 statusDiv.textContent = `${resultsArray.length}件のレシートを検出しました。`;
 
             } catch (err) {
-                console.error("OCR処理エラー:", err);
-                statusDiv.textContent = '処理中にエラーが発生しました。';
-                await showAlert('処理中にエラーが発生しました。');
+                // 上記のtry-catchブロックで捕捉されなかった予期せぬエラー
+                console.error("OCR処理中に予期せぬエラーが発生しました:", err);
+                await showAlert('処理中に予期せぬエラーが発生しました。開発者コンソールを確認してください。', 'エラー');
             } finally {
                 processBtn.disabled = false;
                 processBtn.textContent = '選択したレシートを読み取る';
