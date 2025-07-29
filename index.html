@@ -250,6 +250,10 @@
             </section>
             <section>
                 <h2>場所別支出</h2>
+                <div style="display:flex; gap: 8px; margin-bottom: 1rem; align-items: center;">
+                    <label for="spendingPlaceLimit" style="font-size: 0.9rem; margin-right: 4px;">上位表示数:</label>
+                    <input type="number" id="spendingPlaceLimit" value="10" min="1" style="flex: 1; padding: 0.5rem; font-size: 0.9rem; min-height: unset; margin-bottom: 0;">
+                </div>
                 <div class="filter-buttons">
                     <button id="selectAllPlacesBtn">すべて選択</button>
                     <button id="clearAllPlacesBtn">すべてクリア</button>
@@ -578,7 +582,7 @@
         }
 
         function saveData() {
-            const dataToSave = { transactions, genres, budgetsByMonth, rolloverGenres, placeGenreMap }; // placeGenreMapも保存
+            const dataToSave = { transactions, genres, budgetsByMonth, rolloverGenres, placeGenreMap, spendingPlaceVisibility }; // spendingPlaceVisibilityも保存
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(dataToSave));
             localStorage.setItem('accountBalance', accountBalance);
             localStorage.setItem('variableExpenseCheckDay', variableExpenseCheckDay);
@@ -1327,17 +1331,24 @@
                     return acc;
                 }, {});
 
-            // 集計結果を配列に変換し、金額で降順ソート
-            let sortedPlaces = Object.keys(spendingByPlace).map(place => ({
+            // 集計結果を配列に変換
+            let allPlacesWithSpending = Object.keys(spendingByPlace).map(place => ({
                 place: place,
                 amount: spendingByPlace[place]
-            })).sort((a, b) => b.amount - a.amount);
+            }));
 
-            // 表示が選択されている場所のみにフィルタリング
-            const filteredPlaces = sortedPlaces.filter(item => spendingPlaceVisibility[item.place] !== false); // falseでなければ表示
+            // spendingPlaceVisibilityに基づいてフィルタリング
+            let filteredPlaces = allPlacesWithSpending.filter(item => spendingPlaceVisibility[item.place] !== false);
 
-            const labels = filteredPlaces.map(item => item.place);
-            const data = filteredPlaces.map(item => item.amount);
+            // 金額で降順ソート
+            filteredPlaces.sort((a, b) => b.amount - a.amount);
+
+            // 表示項目数でフィルタリング (上位N件)
+            const limit = parseInt(document.getElementById('spendingPlaceLimit').value) || 10;
+            const finalPlacesToDisplay = filteredPlaces.slice(0, limit);
+
+            const labels = finalPlacesToDisplay.map(item => item.place);
+            const data = finalPlacesToDisplay.map(item => item.amount);
 
             // データがない場合はメッセージを表示
             if (labels.length === 0) {
@@ -1395,7 +1406,7 @@
                         },
                         title: {
                             display: true,
-                            text: '場所別支出' // グラフタイトル
+                            text: '場所別支出 (上位' + limit + '件)' // グラフタイトルに表示項目数を追加
                         }
                     },
                     scales: {
@@ -1877,6 +1888,11 @@
                 budgetSortDirection = budgetSortDirection === 'asc' ? 'desc' : 'asc';
                 e.target.textContent = budgetSortDirection === 'asc' ? '▲' : '▼';
                 renderApp();
+            });
+
+            // 場所別支出グラフの表示項目数入力フィールドのイベントリスナー
+            document.getElementById('spendingPlaceLimit').addEventListener('input', () => {
+                renderSpendingByPlaceGraph(); // 入力値が変更されたらグラフを再描画
             });
 
             // 場所別支出グラフのフィルターボタンのイベントリスナー
